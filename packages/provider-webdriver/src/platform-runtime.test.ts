@@ -5,6 +5,7 @@ import type { DeviceInfo } from '@agent-device/kernel/device';
 import type { Interactor } from '@agent-device/contracts/interactor-types';
 import { HARDWARE_BUTTON_NAME_LABELS, type HardwareButton } from '@agent-device/contracts/device';
 import { createWebDriverPlatformRuntimeOwner } from './platform-runtime.ts';
+import { consumeAllProfileFields } from './profile-fields.fixtures.ts';
 import {
   createCloudWebDriverCapabilities,
   type CloudWebDriverCapabilityOverrides,
@@ -25,6 +26,15 @@ function capabilities(
   });
 }
 
+/** The profile declaration fact generation now reads. Defaults to a provider that captures traffic. */
+function profileFields(networkLogs: 'consumed' | 'refused' = 'consumed', label = 'BrowserStack') {
+  const fields = {
+    ...consumeAllProfileFields('browserstack').fields,
+    providerNetworkLogs: networkLogs,
+  };
+  return { provider: label.toLowerCase(), label, fields };
+}
+
 const device: DeviceInfo = {
   platform: 'android',
   id: 'browserstack:lease-one',
@@ -34,13 +44,14 @@ const device: DeviceInfo = {
   booted: true,
 };
 
-test('direct WebDriver refuses a live network dump instead of answering from another source', async () => {
+test('direct WebDriver refuses a live network dump: its provider captures traffic as a post-session HAR', async () => {
   const run = vi.fn(async () => ({ stdout: 'must not execute', stderr: '', exitCode: 0 }));
   const owner = createWebDriverPlatformRuntimeOwner({
     host: host(run),
     owner: providerRuntimeOwner('browserstack', 'android'),
     ownsDevice: () => true,
     capabilities: capabilities(),
+    profileFields: profileFields(),
   });
   const binding = await owner.bind({
     device,
@@ -56,7 +67,7 @@ test('direct WebDriver refuses a live network dump instead of answering from ano
   expect(binding.facts.operations.networkDump).toMatchObject({
     available: false,
     reason: 'network-capture-post-session',
-    hint: 'The provider publishes any network capture only after its session ends, on the provider dashboard.',
+    hint: expect.stringContaining('--provider-network-logs'),
   });
   expect(binding.facts.operations.appLogInspect).toMatchObject({ available: false });
   for (const operation of [
@@ -74,12 +85,13 @@ test('direct WebDriver refuses a live network dump instead of answering from ano
   expect(run).not.toHaveBeenCalled();
 });
 
-test('a provider with no capture of its own states the same refusal for a live dump', async () => {
+test('a provider that publishes no HAR refuses a live dump without pointing at its own refused flag', async () => {
   const owner = createWebDriverPlatformRuntimeOwner({
     host: host(async () => ({ stdout: '', stderr: '', exitCode: 0 })),
     owner: providerRuntimeOwner(CLOUD_WEBDRIVER_PROVIDERS.awsDeviceFarm, 'android'),
     ownsDevice: () => true,
     capabilities: capabilities('android', undefined, CLOUD_WEBDRIVER_PROVIDERS.awsDeviceFarm),
+    profileFields: profileFields('refused', 'AWS Device Farm'),
   });
 
   expect(await owner.inspectFacts({ ...device, id: 'aws-device-farm:lease-one' })).toMatchObject({
@@ -87,7 +99,7 @@ test('a provider with no capture of its own states the same refusal for a live d
       networkDump: {
         available: false,
         reason: 'network-capture-post-session',
-        hint: 'The provider publishes any network capture only after its session ends, on the provider dashboard.',
+        hint: 'AWS Device Farm publishes no network capture for a session, live or after it ends.',
       },
     },
   });
@@ -137,6 +149,7 @@ test.each([
     owner: providerRuntimeOwner('browserstack', String(_name).toLowerCase()),
     ownsDevice: () => true,
     capabilities: capabilities(),
+    profileFields: profileFields(),
   });
   const binding = await owner.bind({
     device: runtimeDevice,
@@ -215,6 +228,7 @@ test.each([
       ),
       ownsDevice: () => true,
       capabilities: capabilities(),
+      profileFields: profileFields(),
       deployment: {
         fact: () => ({ available: true }),
         deployApp,
@@ -273,6 +287,7 @@ test('captures through only the active exact WebDriver interactor', async () => 
     owner: providerRuntimeOwner('browserstack', 'android'),
     ownsDevice: () => true,
     capabilities: capabilities(),
+    profileFields: profileFields(),
     snapshotAvailable: true,
     getInteractor,
   });
@@ -364,6 +379,7 @@ test.each([
     owner: providerRuntimeOwner('browserstack', 'android'),
     ownsDevice: () => true,
     capabilities: capabilities(),
+    profileFields: profileFields(),
     ...state,
     getInteractor,
   });
@@ -560,6 +576,7 @@ test.each([
     owner: providerRuntimeOwner('browserstack', 'android'),
     ownsDevice: () => true,
     capabilities: capabilities(),
+    profileFields: profileFields(),
     getInteractor: () => ({}) as unknown as Interactor,
   });
   const facts = await owner.inspectFacts(owned);
@@ -584,6 +601,7 @@ test('closes every WebDriver gesture and scroll cell when the interactor is unre
     owner: providerRuntimeOwner('browserstack', 'android'),
     ownsDevice: () => true,
     capabilities: capabilities(),
+    profileFields: profileFields(),
     getInteractor: undefined,
   });
   const facts = await owner.inspectFacts(device);
@@ -621,6 +639,7 @@ test.each([
       owner: providerRuntimeOwner('browserstack', 'android'),
       ownsDevice: () => true,
       capabilities: capabilities('android', { [operation]: 'unsupported' }),
+      profileFields: profileFields(),
       getInteractor: () => ({}) as unknown as Interactor,
     });
 
@@ -642,6 +661,7 @@ test('a reachable provider with no overrides still admits its declared operation
     owner: providerRuntimeOwner('browserstack', 'android'),
     ownsDevice: () => true,
     capabilities: capabilities(),
+    profileFields: profileFields(),
     getInteractor: () => ({}) as unknown as Interactor,
   });
 
@@ -660,6 +680,7 @@ test('hardware-button facts follow the platform capability map', async () => {
       owner: providerRuntimeOwner('browserstack', platform),
       ownsDevice: () => true,
       capabilities: capabilities(platform),
+      profileFields: profileFields(),
       getInteractor: () => ({}) as unknown as Interactor,
     });
 
@@ -711,6 +732,7 @@ test('Android TV hardware buttons are refused before a WebDriver interactor is a
     owner: providerRuntimeOwner('browserstack', 'android'),
     ownsDevice: () => true,
     capabilities: capabilities('android'),
+    profileFields: profileFields(),
     getInteractor,
   });
   const tv: DeviceInfo = { ...device, target: 'tv' };
@@ -748,6 +770,7 @@ test('an iOS WebDriver device serves keyboard dismiss, and neither the unproven 
     owner: providerRuntimeOwner('browserstack', 'ios'),
     ownsDevice: () => true,
     capabilities: capabilities('ios'),
+    profileFields: profileFields(),
     getInteractor: vi.fn(() => ({}) as unknown as Interactor),
   });
   const facts = await owner.inspectFacts(iosDevice);
@@ -766,6 +789,7 @@ test('a provider that declares no keyboard capability closes the keyboard family
     owner: providerRuntimeOwner('browserstack', 'android'),
     ownsDevice: () => true,
     capabilities: capabilities('android', { keyboard: 'unsupported' }),
+    profileFields: profileFields(),
     getInteractor: vi.fn(() => ({}) as unknown as Interactor),
   });
   const facts = await owner.inspectFacts(device);

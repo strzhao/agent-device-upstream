@@ -67,6 +67,7 @@ import {
 } from '@agent-device/contracts/touch-runtime';
 import { viewportRuntimeOperationFacts } from '@agent-device/contracts/viewport-runtime';
 import type { Interactor, RunnerContext } from '@agent-device/contracts/interactor-types';
+import type { ProviderProfileFieldDeclaration } from '@agent-device/contracts/provider-profile-fields';
 import type { DeviceInfo } from '@agent-device/kernel/device';
 import { AppError } from '@agent-device/kernel/errors';
 import { type WebDriverDeploymentRuntime, webDriverInactiveSession } from './runtime-deployment.ts';
@@ -85,16 +86,27 @@ type WebDriverPlatformDeploymentRuntime = Pick<
 
 const available = Object.freeze({ available: true } as const);
 const appLogUnavailable = unavailableFact('unsupported-provider-mode');
+/** The hint a provider that publishes a post-session HAR gives in place of a live dump. */
+const postSessionNetworkCaptureHint =
+  'Request --provider-network-logs when the session starts, then read the HAR with artifacts after disconnect ends the provider session.';
 /**
- * A live `network dump` needs a source the session can read. A hosted provider keeps traffic on its
- * own side: whatever the provider captures at all, it publishes only once its session ends, through
- * the provider's own dashboard or session records. Nothing is readable live, and the runtime must
- * not answer with an empty dump that looks like "no traffic".
+ * A live `network dump` needs a source the session can read. These providers capture traffic through
+ * their own proxy and publish it as a HAR only once the session ends, so nothing is readable live.
+ *
+ * A provider that refuses the opt-in publishes no HAR either, so its refusal must not point at a
+ * flag it rejects. The provider's own profile declaration decides the wording.
  */
-const networkCaptureUnavailable = unavailableFact(
-  'network-capture-post-session',
-  'The provider publishes any network capture only after its session ends, on the provider dashboard.',
-);
+function networkCaptureFact(
+  profileFields: ProviderProfileFieldDeclaration,
+): RuntimeOperationUnavailability {
+  if (profileFields.fields.providerNetworkLogs === 'consumed') {
+    return unavailableFact('network-capture-post-session', postSessionNetworkCaptureHint);
+  }
+  return unavailableFact(
+    'network-capture-post-session',
+    `${profileFields.label} publishes no network capture for a session, live or after it ends.`,
+  );
+}
 const recordingUnavailable = unavailableFact(
   'unsupported-provider-mode',
   'WebDriver provider runtimes do not expose screen recording.',
@@ -336,6 +348,8 @@ export type WebDriverPlatformRuntimeOptions = Readonly<{
    * (ADR 0019 §2: no stubs that throw `unsupported` after binding).
    */
   capabilities: CloudWebDriverProviderCapabilities;
+  /** What this provider does with each profile field; the network-capture refusal reads it. */
+  profileFields: ProviderProfileFieldDeclaration;
   screenshotAvailable?: boolean;
   snapshotAvailable?: boolean;
   getInteractor?(device: DeviceInfo, runner?: RunnerContext): Interactor | undefined;
@@ -667,7 +681,7 @@ function webDriverFacts(
       // Stated here rather than through the `network` cell: `network` is the fallback the shared
       // hub gives every optional cell this owner leaves unclassified, so putting the network-capture
       // reason there would report it for unrelated reads. Only this cell refuses post-session.
-      networkDump: networkCaptureUnavailable,
+      networkDump: networkCaptureFact(options.profileFields),
       shutdownTarget: unavailableFact(
         'unsupported-provider-mode',
         'WebDriver owns the target lifecycle for provider-owned devices.',

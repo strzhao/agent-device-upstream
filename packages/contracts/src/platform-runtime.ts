@@ -110,9 +110,8 @@ export type RuntimeOperationUnavailability = Readonly<{
     | 'unsupported-provider-mode'
     | 'owner-capability-missing'
     /**
-     * A hosted provider owns the network path for its session, so a live `network dump` has no
-     * source to read. Where the provider records traffic at all, it publishes that report only
-     * after its own session ends, on the provider's side.
+     * The owner can deliver network capture only as an artifact finalized after the provider
+     * session ends (a post-session HAR), so a live `network dump` has no source to read.
      */
     | 'network-capture-post-session';
   hint?: string;
