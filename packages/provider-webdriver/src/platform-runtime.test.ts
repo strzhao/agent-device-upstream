@@ -116,6 +116,7 @@ test('the post-session refusal stays on networkDump and does not leak into the t
     owner: providerRuntimeOwner('browserstack', 'android'),
     ownsDevice: () => true,
     capabilities: capabilities(),
+    profileFields: profileFields(),
   });
 
   const facts = await owner.inspectFacts(device);
